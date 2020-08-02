@@ -1,0 +1,110 @@
+#!/bin/sh
+
+basename="${0##*/}"
+song_playing_file=~/.song-playing
+paused=false
+
+cmds_fifo=/tmp/"$basename".fifo
+rm -f "$cmds_fifo"
+mkfifo "$cmds_fifo"
+
+default_player=mpg123
+: "${player="$default_player"}"
+
+default_loop=all
+: "${loop="$default_loop"}"
+
+cleanup_on_exit() {
+  terminate_player
+  rm -f "$cmds_fifo"
+  kill 0
+}
+
+trap cleanup_on_exit EXIT
+
+terminate_player() {
+  if [ -n "$player_pid" ]; then
+    pkill -P "$player_pid"
+  fi
+  rm -f "$song_playing_file"
+}
+
+cmd_loop() {
+  case "$loop" in
+    all) loop=one ;;
+    one) loop=none ;;
+    none) loop=all ;;
+  esac
+  printf 'loop mode: %s\n' "$loop"
+}
+
+cmd_next() {
+  terminate_player
+}
+
+cmd_pause() {
+  if "$paused"; then
+    kill -CONT "$player_pid"
+    pkill -CONT -P "$player_pid"
+    paused=false
+  else
+    pkill -TSTP -P "$player_pid"
+    kill -TSTP "$player_pid"
+    paused=true
+  fi
+}
+
+cmd_previous() {
+  terminate_player
+  play_song "${previous_song:-"$current_song"}"
+}
+
+cmd_quit() {
+  exit 0
+}
+
+read_commands() {
+  while true; do
+    while read command; do
+      if [ "$command" = player_end ]; then
+        return 0
+      fi
+      cmd_"$command"
+    done < "$cmds_fifo"
+  done
+}
+
+play_song() {
+  previous_song="$current_song" # only tracks "real" previously played song
+  current_song="$1"
+  song_basename="${current_song##*/}"
+  song_basename="${song_basename%.*}"
+  printf '%s\n' "$song_basename" > "$song_playing_file"
+  printf 'Playing: %s\n' "$song_basename"
+  (
+    trap 'echo player_end > "$cmds_fifo"' EXIT
+    "$player" "$current_song" > /dev/null 2>&1
+  ) &
+  player_pid="$!"
+  read_commands
+}
+
+play_all() {
+  played_once=false
+
+  while true; do
+    for song do
+      while true; do
+        play_song "$song"
+        if [ "$loop" != one ]; then
+          break
+        fi
+      done
+    done
+    if [ "$loop" != all ]; then
+      break
+    fi
+  done
+}
+
+play_all "$@"
