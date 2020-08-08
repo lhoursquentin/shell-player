@@ -1,0 +1,25 @@
+#!/bin/sh
+
+cmd="$1"
+
+set -- loop next pause previous quit
+
+if [ -z "$cmd" ]; then
+  if ! cmd="$(printf '%s\n' "$@" | dmenu)" || [ -z "$cmd" ]; then
+    exit 1
+  fi
+fi
+
+fifo=/tmp/shell-player.fifo
+
+send_cmd() {
+  printf '%s\n' "$1" > "$fifo"
+}
+
+for valid_cmd do
+  case "$valid_cmd" in
+    "$cmd"*) # assuming there is no conflict
+      send_cmd "$valid_cmd"
+      ;;
+  esac
+done
