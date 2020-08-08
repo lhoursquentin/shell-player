@@ -1,8 +1,11 @@
 #!/bin/sh
 
+: "${1?No file(s) provided}"
+
 basename="${0##*/}"
 song_playing_file=~/.song-playing
 paused=false
+event_id=0
 
 cmds_fifo=/tmp/"$basename"-commands.fifo
 player_info_fifo=/tmp/"$basename"-info.fifo
@@ -96,6 +99,7 @@ read_commands() {
 cast_player_info() {
   if [ -n "$cast_player_info_pid" ]; then
     kill "$cast_player_info_pid"
+    event_id="$((event_id + 1))"
   fi
   {
     if "$paused"; then
@@ -105,7 +109,8 @@ cast_player_info() {
     fi
     printf '%s: %s
 Loop: %s
-' "$status" "$song_basename" "$loop" > "$player_info_fifo"
+event_id: %s
+' "$status" "$song_basename" "$loop" "$event_id" > "$player_info_fifo"
     echo cast_player_info_end > "$cmds_fifo"
   } &
   cast_player_info_pid="$!"
