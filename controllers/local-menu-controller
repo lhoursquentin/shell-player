@@ -1,0 +1,18 @@
+#!/bin/sh
+
+fifo=/tmp/shell-player.fifo
+
+: "${menu:=dmenu}" # fzf would be another great choice
+
+dump_commands() {
+  printf '%s\n' loop next pause previous quit
+}
+
+send_cmd() {
+  printf '%s\n' "$1" > "$fifo"
+}
+
+# do not quote menu to allow potential arguments passed via the env
+if cmd="$(dump_commands | $menu)" && [ -n "$cmd" ]; then
+  send_cmd "$cmd"
+fi
