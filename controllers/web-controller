@@ -1,0 +1,45 @@
+#!/bin/sh
+
+fifo=/tmp/shell-player.fifo
+port=8080
+ip="$(ip route get 1 | sed -n 's/.*src \([^ ]*\).*/\1/p')" # linux only
+
+printf 'Access controller on: %s:%s\n' "$ip" "$port"
+
+send_cmd() {
+  printf '%s\n' "$1" > "$fifo"
+}
+
+dump_request_content() {
+  printf 'HTTP 1.1 200 OK\r\n\r
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>shell-player</title>
+  </head>
+  <body>
+    <form method="POST">
+      <input type="submit" name="action" value="previous">
+      <input type="submit" name="action" value="next">
+      <input type="submit" name="action" value="loop">
+      <input type="submit" name="action" value="pause">
+      <input type="submit" name="action" value="quit">
+    </form>
+  </body>
+</html>
+'
+}
+
+serve_page() {
+  dump_request_content | nc -l -p "$port"
+}
+
+filter_action() {
+  sed -n '$s/action=//p'
+}
+
+while action="$(serve_page | filter_action)"; do
+  if [ -n "$action" ]; then
+    send_cmd "$action"
+  fi
+done
