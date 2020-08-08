@@ -1,6 +1,6 @@
 #!/bin/sh
 
-fifo=/tmp/shell-player.fifo
+fifo=/tmp/shell-player-commands.fifo
 
 : "${menu:=dmenu}" # fzf would be another great choice
 

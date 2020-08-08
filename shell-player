@@ -4,9 +4,10 @@ basename="${0##*/}"
 song_playing_file=~/.song-playing
 paused=false
 
-cmds_fifo=/tmp/"$basename".fifo
-rm -f "$cmds_fifo"
-mkfifo "$cmds_fifo"
+cmds_fifo=/tmp/"$basename"-commands.fifo
+player_info_fifo=/tmp/"$basename"-info.fifo
+rm -f "$cmds_fifo" "$player_info_fifo"
+mkfifo "$cmds_fifo" "$player_info_fifo"
 
 default_player=mpg123
 : "${player="$default_player"}"
@@ -16,7 +17,7 @@ default_loop=all
 
 cleanup_on_exit() {
   terminate_player
-  rm -f "$cmds_fifo"
+  rm -f "$cmds_fifo" "$player_info_fifo"
   kill 0
 }
 
@@ -66,12 +67,48 @@ cmd_quit() {
 read_commands() {
   while true; do
     while read command; do
-      if [ "$command" = player_end ]; then
-        return 0
-      fi
-      cmd_"$command"
+      case "$command" in
+        player_end)
+          return 0
+          ;;
+        cast_player_info_end)
+          # only reachable when the caster notifies its own death, in that case
+          # the pid doesn't hold a meaning anymore, clear it to prevent trying
+          # to kill it on the next invocation.
+          unset cast_player_info_pid
+          cast_player_info
+          ;;
+        loop|pause)
+          cmd_"$command"
+          cast_player_info
+          ;;
+        next|previous)
+          # no need to case in these cases since there is a cast_player_info
+          # call in in play_song, this is needed to start casting before any
+          # commands are read
+          cmd_"$command"
+          ;;
+      esac
     done < "$cmds_fifo"
   done
+}
+
+cast_player_info() {
+  if [ -n "$cast_player_info_pid" ]; then
+    kill "$cast_player_info_pid"
+  fi
+  {
+    if "$paused"; then
+      status=Paused
+    else
+      status=Playing
+    fi
+    printf '%s: %s
+Loop: %s
+' "$status" "$song_basename" "$loop" > "$player_info_fifo"
+    echo cast_player_info_end > "$cmds_fifo"
+  } &
+  cast_player_info_pid="$!"
 }
 
 play_song() {
@@ -79,14 +116,15 @@ play_song() {
   current_song="$1"
   song_basename="${current_song##*/}"
   song_basename="${song_basename%.*}"
-  # TODO write playing info in another fifo for controller consumption
+  # fifo for blocking readers
+  cast_player_info
+  # And for potential non blocking readers
   printf '%s\n' "$song_basename" > "$song_playing_file"
-  printf 'Playing: %s\n' "$song_basename"
   {
     trap 'echo player_end > "$cmds_fifo"' EXIT
     # Do not quote the player variable to allow the user to pass arguments, for
     # instance `player='cvlc --play-and-exit' ./shell-player songs/*.mp3`
-    $player "$current_song" > /dev/null 2>&1
+    $player "$current_song" > /dev/null 2>&1 < /dev/null
   } &
   player_pid="$!"
   read_commands

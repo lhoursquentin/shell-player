@@ -1,6 +1,6 @@
 #!/bin/sh
 
-fifo=/tmp/shell-player.fifo
+fifo=/tmp/shell-player-commands.fifo
 port=8080
 ip="$(ip route get 1 | sed -n 's/.*src \([^ ]*\).*/\1/p')" # linux only
 
