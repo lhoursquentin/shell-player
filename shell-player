@@ -79,12 +79,15 @@ play_song() {
   current_song="$1"
   song_basename="${current_song##*/}"
   song_basename="${song_basename%.*}"
+  # TODO write playing info in another fifo for controller consumption
   printf '%s\n' "$song_basename" > "$song_playing_file"
   printf 'Playing: %s\n' "$song_basename"
-  (
+  {
     trap 'echo player_end > "$cmds_fifo"' EXIT
-    "$player" "$current_song" > /dev/null 2>&1
-  ) &
+    # Do not quote the player variable to allow the user to pass arguments, for
+    # instance `player='cvlc --play-and-exit' ./shell-player songs/*.mp3`
+    $player "$current_song" > /dev/null 2>&1
+  } &
   player_pid="$!"
   read_commands
 }
