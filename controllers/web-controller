@@ -10,8 +10,6 @@ rm -f "$server_rx_fifo" "$server_tx_fifo"
 mkfifo "$server_rx_fifo" "$server_tx_fifo"
 port=8080
 ip="$(ip route get 1 | sed -n 's/.*src \([^ ]*\).*/\1/p')" # linux only
-event_id=
-wait_for_new_event=false
 
 printf 'Access controller on: %s:%s\n' "$ip" "$port"
 
@@ -27,9 +25,9 @@ dump_request_content() {
     <title>shell-player</title>
   </head>
   <body>
-    <div>
+    <header>
       %s
-    <div>
+    </header>
     <form method="POST">
       <input type="submit" name="action" value="previous">
       <input type="submit" name="action" value="next">
@@ -43,28 +41,11 @@ dump_request_content() {
 }
 
 fetch_info() {
-  found_new_event=false
-  while ! "$found_new_event"; do
-    info=
-    while IFS= read line; do
-      case "$line" in
-        'event_id: '*)
-          new_event_id="${line#* }"
-          # should be double checked with a timestamp
-          if [ "$new_event_id" != "$event_id" ]; then
-            event_id="$new_event_id"
-            found_new_event=true
-          fi
-          ;;
-      esac
-      info="$info<div>$line</div>"
-    done < "$info_fifo"
-    if ! "$wait_for_new_event"; then
-      break
-    fi
-    sleep 0.1 # avoid overloading the player info fifo
-  done
-  wait_for_new_event=false
+  info=
+  send_cmd info
+  while IFS= read line; do
+    info="$info<div>$line</div>"
+  done < "$info_fifo"
 }
 
 run_server() {
@@ -93,7 +74,6 @@ process_request() {
             payload="$(dd bs=1 count="$content_length" status=none <&4)"
             if [ -n "$payload" ]; then
               send_cmd "${payload#action=}"
-              wait_for_new_event=true
             fi
           fi
           exec 4<&-
@@ -114,7 +94,6 @@ process_request() {
 }
 
 run_server
-fetch_info
 
 while process_request; do
   :

@@ -5,9 +5,9 @@
 basename="${0##*/}"
 song_playing_file=~/.song-playing
 paused=false
-event_id=0
 
 cmds_fifo=/tmp/"$basename"-commands.fifo
+cmds_fifo_opened=false
 player_info_fifo=/tmp/"$basename"-info.fifo
 rm -f "$cmds_fifo" "$player_info_fifo"
 mkfifo "$cmds_fifo" "$player_info_fifo"
@@ -33,13 +33,30 @@ terminate_player() {
   rm -f "$song_playing_file"
 }
 
+cmd_info() {
+  if "$transient_state"; then
+    # FIXME this will spam the fifo while waiting for the transient state to
+    # resolve
+    send_cmd info
+  else
+    {
+      if "$paused"; then
+        status=Paused
+      else
+        status=Playing
+      fi
+      printf '%s: %s
+Loop: %s\n' "$status" "$song_basename" "$loop" > "$player_info_fifo"
+    } &
+  fi
+}
+
 cmd_loop() {
   case "$loop" in
     all) loop=one ;;
     one) loop=none ;;
     none) loop=all ;;
   esac
-  printf 'loop mode: %s\n' "$loop"
 }
 
 cmd_next() {
@@ -68,52 +85,31 @@ cmd_quit() {
 }
 
 read_commands() {
+  transient_state=false
   while true; do
     while read command; do
       case "$command" in
         player_end)
           return 0
           ;;
-        cast_player_info_end)
-          # only reachable when the caster notifies its own death, in that case
-          # the pid doesn't hold a meaning anymore, clear it to prevent trying
-          # to kill it on the next invocation.
-          unset cast_player_info_pid
-          cast_player_info
-          ;;
-        loop|pause)
-          cmd_"$command"
-          cast_player_info
-          ;;
         next|previous)
-          # no need to case in these cases since there is a cast_player_info
-          # call in in play_song, this is needed to start casting before any
-          # commands are read
+          cmd_"$command"
+          transient_state=true
+          ;;
+        *)
           cmd_"$command"
           ;;
       esac
-    done < "$cmds_fifo"
+    done <&3
+    # mksh, oksh & dash fail with `cannot open /tmp/shell-player-commands.fifo:
+    # Interrupted system call`, even when closing the fd beforehand, needs more
+    # investigation. ksh/zsh/bash/yash work fine.
+    exec 3< "$cmds_fifo"
   done
 }
 
-cast_player_info() {
-  if [ -n "$cast_player_info_pid" ]; then
-    kill "$cast_player_info_pid"
-    event_id="$((event_id + 1))"
-  fi
-  {
-    if "$paused"; then
-      status=Paused
-    else
-      status=Playing
-    fi
-    printf '%s: %s
-Loop: %s
-event_id: %s
-' "$status" "$song_basename" "$loop" "$event_id" > "$player_info_fifo"
-    echo cast_player_info_end > "$cmds_fifo"
-  } &
-  cast_player_info_pid="$!"
+send_cmd() {
+  printf '%s\n' "$1" > "$cmds_fifo"
 }
 
 play_song() {
@@ -121,17 +117,23 @@ play_song() {
   current_song="$1"
   song_basename="${current_song##*/}"
   song_basename="${song_basename%.*}"
-  # fifo for blocking readers
-  cast_player_info
-  # And for potential non blocking readers
+  # For potential non blocking readers
   printf '%s\n' "$song_basename" > "$song_playing_file"
   {
-    trap 'echo player_end > "$cmds_fifo"' EXIT
+    trap 'send_cmd player_end' EXIT
     # Do not quote the player variable to allow the user to pass arguments, for
     # instance `player='cvlc --play-and-exit' ./shell-player songs/*.mp3`
     $player "$current_song" > /dev/null 2>&1 < /dev/null
   } &
   player_pid="$!"
+
+  if ! "$cmds_fifo_opened"; then
+    # using an fd is required to avoid data loss on partial reads, when
+    # receiving a player_end the read loop is left abruptly, later we can
+    # resume where we left with this fd
+    exec 3< "$cmds_fifo"
+    cmds_fifo_opened=true
+  fi
   read_commands
 }
 
