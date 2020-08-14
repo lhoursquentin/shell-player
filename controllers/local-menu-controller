@@ -1,18 +1,26 @@
 #!/bin/sh
 
-fifo=/tmp/shell-player-commands.fifo
+cmds_fifo=/tmp/shell-player-commands.fifo
+info_fifo=/tmp/shell-player-info.fifo
 
 : "${menu:=dmenu}" # fzf would be another great choice
 
 dump_commands() {
-  printf '%s\n' loop next pause previous quit
+  printf '%s\n' info loop next pause previous quit
 }
 
 send_cmd() {
-  printf '%s\n' "$1" > "$fifo"
+  printf '%s\n' "$1" > "$cmds_fifo"
+}
+
+fetch_info() {
+  cat "$info_fifo"
 }
 
 # do not quote menu to allow potential arguments passed via the env
 if cmd="$(dump_commands | $menu)" && [ -n "$cmd" ]; then
   send_cmd "$cmd"
+  case "$cmd" in
+    info) fetch_info
+  esac
 fi
